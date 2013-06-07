@@ -87,7 +87,7 @@ object GatlingTest {
 		val xml = new StringBuilder()
 		xml.append(xmlHeader).append(properties)
 		data.requestStats map { case (name, stats) =>
-			val testTime: Double = stats.duration / stats.count.toDouble 
+			val testTime: Double = stats.duration / stats.count.toDouble / 100
 			val failureText = if (stats.failed > 0) {
 				"""<failure message="KO">%d/%d requests failed</failure>""".format(stats.failed, stats.requests)
 			} else {
