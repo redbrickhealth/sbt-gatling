@@ -57,14 +57,16 @@ object GatlingTest {
 	def finish(data: GatlingDataWriter) {
 		import java.io.File
 		val handler = simulationHandlers(data.runRecord.simulationId) 
-		val failed = if (data.failed) {
+		val failures = data.requestStats.map ({ case (name, stats) =>
+			if (stats.failed > 0) 1 else 0
+		}).foldLeft(0) { (count, state) => count + state }
+		if (failures > 0) {
 			handler.handle(new org.scalatools.testing.Event {
 				def testName() = testName
 				def description() = testName
-				def result(): Result = Result.Failure
+				def result(): Result = Result.Error
 				def error(): Throwable = null
 			})
-			true
 		} else {
 			handler.handle(new org.scalatools.testing.Event {
 				def testName() = testName
@@ -72,41 +74,26 @@ object GatlingTest {
 				def result(): Result = Result.Success
 				def error(): Throwable = null
 			})
-			false
-		}
-		data.requestStats map { case (name, stats) =>
-			if (stats.failed) {
-				handler.handle(new org.scalatools.testing.Event {
-					def testName() = name
-					def description() = name
-					def result(): Result = Result.Failure
-					def error(): Throwable = null
-				})
-				true
-			} else {
-				handler.handle(new org.scalatools.testing.Event {
-					def testName() = name
-					def description() = name
-					def result(): Result = Result.Success
-					def error(): Throwable = null
-				})
-			}
 		}
 		val suiteName = data.runRecord.runDescription
 		val hostname = "unknown"
-		val failures = if (failed) 1 else 0
 		val time: Double = 1.0
 		val errors = 0
 		val xmlHeader = """<testsuite tests="1" skipped="0" name="%s" hostname="%s" failures="%d" time="%f" errors="%d">""".format(suiteName, hostname, failures, time, errors)
 		val properties = """<properties></properties>"""
-		val testcasePattern = """<testcase name="%s" time="%f" classname="%s"></testcase>"""
+		val testcasePattern = """<testcase name="%s" time="%f" classname="%s">%s</testcase>"""
 		val output = """<system-out></system-out> <system-err></system-err> """
 		val xmlFooter = "</testsuite>"
 		val xml = new StringBuilder()
 		xml.append(xmlHeader).append(properties)
 		data.requestStats map { case (name, stats) =>
 			val testTime: Double = stats.count.toDouble / stats.duration
-			xml.append(testcasePattern.format(name, testTime, suiteName))
+			val failureText = if (stats.failed > 0) {
+				"""<failure message="KO">%d/%d requests failed</failure>""".format(stats.failed, stats.requests)
+			} else {
+				""
+			}
+			xml.append(testcasePattern.format(name, testTime, suiteName, failureText))
 		}
 		xml.append(output).append(xmlFooter)
 		sbt.IO.createDirectory(new File("target/gatling-reports/xml"))
@@ -150,7 +137,19 @@ with com.excilys.ebi.gatling.core.action.AkkaDefaults {
 
 		val runRecord = RunRecord(now, selection.simulationId, selection.description)
 
-		val simulation = simulationClass.newInstance
+		val simulation = try { simulationClass.newInstance }
+		catch {
+			case e => {
+				val handler = GatlingTest.simulationHandlers(runRecord.simulationId) 
+				handler.handle(new org.scalatools.testing.Event {
+					def testName() = testName
+					def description() = testName
+					def result(): Result = Result.Failure
+					def error(): Throwable = null
+				})
+				return
+			}
+		}
 		val scenarios = simulation.scenarios
 
 		require(!scenarios.isEmpty, simulationClass.getName + " returned an empty scenario list. Did you forget to migrate your Simulations?")
@@ -190,13 +189,15 @@ with com.excilys.ebi.gatling.core.action.AkkaDefaults {
 class RequestStats {
 	var count: Long = 0
 	var duration: Long = 1
-	var failed = false
+	var failed: Long = 0
+	var requests: Long = 0
 	import com.excilys.ebi.gatling.core.result.message.{RequestRecord, RequestStatus}
 	def update(record: RequestRecord) {
 		this.synchronized {
 			count = count + 1
 			duration = duration + record.executionEndDate - record.executionStartDate
-			if (record.requestStatus == RequestStatus.KO) failed = true
+			if (record.requestStatus == RequestStatus.KO) failed = failed + 1
+			requests = requests + 1
 		}
 	}
 }
@@ -209,6 +210,9 @@ class GatlingDataWriter extends com.excilys.ebi.gatling.core.result.writer.DataW
 
 	def onFlushDataWriter {
 		GatlingTest.finish(this)
+		runRecord = null
+		failed = false
+		requestStats = Map.empty
 	}
 	def onInitializeDataWriter(runRecord: RunRecord, scenarios: Seq[ShortScenarioDescription]) {
 		this.runRecord = runRecord
