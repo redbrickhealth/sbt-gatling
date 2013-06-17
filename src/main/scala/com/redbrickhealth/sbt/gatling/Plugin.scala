@@ -32,7 +32,6 @@ object Plugin extends sbt.impl.DependencyBuilders {
 			val sources = (classesDir ** sbt.GlobFilter("*.class") get) map { file =>
 				val filePath = file.getPath()
 				val index: Int = filePath.lastIndexOf(classesDir.getPath())
-				println("AJK path is " + filePath)
 				file -> filePath
 			}
 			val outputJar = new java.io.File(targetDir, "gatling.jar")
