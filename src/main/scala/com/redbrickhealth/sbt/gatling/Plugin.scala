@@ -12,7 +12,8 @@ object Plugin extends sbt.impl.DependencyBuilders {
 				n => new sbt.Artifact(n + artifactNameSuffix, "jar", "jar", Some("gatling"), Set(sbt.Compile), None, Map.empty)
 			),
 			artifactTask
-		)
+		) ++ 
+		(Plugin.artifactTask <<= Plugin.artifactTask dependsOn(sbt.Keys.compile in Plugin.GatlingTest))
 	}
 	val artifactTask = sbt.TaskKey[java.io.File]("gatling-artifact")
 	lazy val GatlingTest = sbt.config("gatling") extend(sbt.Test)
