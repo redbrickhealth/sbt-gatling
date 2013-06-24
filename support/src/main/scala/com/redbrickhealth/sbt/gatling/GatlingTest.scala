@@ -133,25 +133,27 @@ with com.excilys.ebi.gatling.core.action.AkkaDefaults {
 		// Borrowed from com.excilys.ebi.gatling.core.runner.Runner.scala
 		// to avoid system.shutdown.
 		val simulationClass = selection.simulationClass
-		println("Simulation " + simulationClass.getName + " started...")
+		println("[info] Simulation " + simulationClass.getName + " started...")
 
 		val runRecord = RunRecord(now, selection.simulationId, selection.description)
 
 		val simulation = try { simulationClass.newInstance }
 		catch {
 			case e => {
+				println("[error] %s: %s".format(testName, e.getMessage()))
 				val handler = GatlingTest.simulationHandlers(runRecord.simulationId) 
 				handler.handle(new org.scalatools.testing.Event {
 					def testName() = testName
 					def description() = testName
 					def result(): Result = Result.Failure
-					def error(): Throwable = null
+					def error(): Throwable = e
 				})
 				return
 			}
 		}
 		val scenarios = simulation.scenarios
 
+		try {
 		require(!scenarios.isEmpty, simulationClass.getName + " returned an empty scenario list. Did you forget to migrate your Simulations?")
 		val scenarioNames = scenarios.map(_.name)
 		require(scenarioNames.toSet.size == scenarioNames.size, "Scenario names must be unique but found " + scenarioNames)
@@ -175,7 +177,12 @@ with com.excilys.ebi.gatling.core.action.AkkaDefaults {
 		// debug("Finished Launching scenarios executions")
 
 		terminatorLatch.await(configuration.core.timeOut.simulation, SECONDS)
-		println("Simulation finished.")
+		} catch {
+			case e => {
+				println("[error] %s: %s".format(testName, e.getMessage))
+			}
+		}
+		println("[info] Simulation finished.")
 
 		// And now we generate the HTML reports
 		val dataReader = com.excilys.ebi.gatling.core.result.reader.DataReader.newInstance(runRecord.runId)
