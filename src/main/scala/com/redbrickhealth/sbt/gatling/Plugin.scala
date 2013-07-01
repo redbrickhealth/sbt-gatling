@@ -17,11 +17,13 @@ object Plugin extends sbt.impl.DependencyBuilders {
 	}
 	val artifactTask = sbt.TaskKey[java.io.File]("gatling-artifact")
 	lazy val GatlingTest = sbt.config("gatling") extend(sbt.Test)
-	lazy val gatlingSettings: Seq[sbt.Project.Setting[_]] = Seq(sbt.inConfig(GatlingTest)(sbt.Defaults.testSettings) : _*)
-	lazy val settings = gatlingSettings ++ Seq(
-		sbt.Keys.libraryDependencies += "com.excilys.ebi.gatling.highcharts" % "gatling-charts-highcharts" % "1.5.1" % "test",
-		sbt.Keys.libraryDependencies += ("com.redbrickhealth" %% "sbt-gatling-support" % "0.1-SNAPSHOT" % "test" changing),
-		sbt.Keys.sourceDirectory in GatlingTest <<= sbt.Keys.sourceDirectory { source =>
+	lazy val settings: Seq[sbt.Project.Setting[_]] = Seq(
+		sbt.Keys.ivyConfigurations += GatlingTest,
+		sbt.Keys.libraryDependencies += "com.excilys.ebi.gatling.highcharts" % "gatling-charts-highcharts" % "1.5.1" % "gatling",
+		sbt.Keys.libraryDependencies += ("com.redbrickhealth" %% "sbt-gatling-support" % "1.2" % "gatling" changing)
+	) ++ sbt.inConfig(GatlingTest)(gatlingSettings)
+	lazy val gatlingSettings = sbt.Defaults.testSettings ++ Seq(
+		sbt.Keys.sourceDirectory in GatlingTest <<= (sbt.Keys.sourceDirectory in sbt.Configurations.Default) { source =>
 			import sbt.Path._
 			source / "test/gatling"
 		},
