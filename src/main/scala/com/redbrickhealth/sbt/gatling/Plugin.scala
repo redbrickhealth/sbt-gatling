@@ -11,9 +11,9 @@ object Plugin extends sbt.impl.DependencyBuilders {
 			sbt.Keys.moduleName(
 				n => new sbt.Artifact(n + artifactNameSuffix, "jar", "jar", Some("gatling"), Set(sbt.Compile), None, Map.empty)
 			),
-			artifactTask
+			artifactTask in GatlingTest
 		) ++ 
-		(Plugin.artifactTask <<= Plugin.artifactTask dependsOn(sbt.Keys.compile in Plugin.GatlingTest))
+		(artifactTask in GatlingTest <<= artifactTask in GatlingTest dependsOn(sbt.Keys.compile in Plugin.GatlingTest))
 	}
 	val artifactTask = sbt.TaskKey[java.io.File]("gatling-artifact")
 	lazy val GatlingTest = sbt.config("gatling") extend(sbt.Test)
@@ -26,19 +26,28 @@ object Plugin extends sbt.impl.DependencyBuilders {
 			source / "test/gatling"
 		},
 		sbt.Keys.parallelExecution in GatlingTest := false,
-		sbt.Keys.managedClasspath in GatlingTest <<= sbt.Keys.managedClasspath in sbt.Test,
 		sbt.Keys.testFrameworks in GatlingTest := Seq(new sbt.TestFramework("com.redbrickhealth.sbt.gatling.GatlingTest")),
-		artifactTask <<= (sbt.Keys.crossTarget in sbt.Compile, sbt.Keys.classDirectory in GatlingTest) map { (targetDir, classesDir) =>
+		sbt.Keys.definedTests in GatlingTest <<= detectGatlingTests,
+		artifactTask in GatlingTest <<= (sbt.Keys.crossTarget in sbt.Compile, sbt.Keys.classDirectory in GatlingTest) map { (targetDir, classesDir) =>
 			import sbt.Path._
 			val sources = (classesDir ** sbt.GlobFilter("*.class") get) map { file =>
 				val filePath = file.getPath()
 				val index: Int = filePath.lastIndexOf(classesDir.getPath())
-				file -> filePath
+				file -> filePath.substring(index + classesDir.getPath().length)
 			}
 			val outputJar = new java.io.File(targetDir, "gatling.jar")
 			sbt.IO.zip(sources, outputJar)
 			outputJar
 		}
 	) 
+
+	def detectGatlingTests: sbt.Project.Initialize[sbt.Task[Seq[sbt.TestDefinition]]] = (sbt.Keys.streams, sbt.Keys.loadedTestFrameworks in GatlingTest, sbt.Keys.compile in GatlingTest) map { (streams, frameworkMap, analysis) =>
+		val fingerprint = new org.scalatools.testing.SubclassFingerprint {
+			def isModule(): Boolean = false
+			def superClassName(): String = "com.excilys.ebi.gatling.core.scenario.configuration.Simulation"
+		}
+		sbt.Tests.discover(frameworkMap.values.toSeq, analysis, streams.log)._1.toList
+	}
 }
+
 
