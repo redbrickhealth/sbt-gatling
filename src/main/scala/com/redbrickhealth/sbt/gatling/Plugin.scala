@@ -30,13 +30,18 @@ object Plugin extends sbt.impl.DependencyBuilders {
 		sbt.Keys.parallelExecution in GatlingTest := false,
 		sbt.Keys.testFrameworks in GatlingTest := Seq(new sbt.TestFramework("com.redbrickhealth.sbt.gatling.GatlingTest")),
 		sbt.Keys.definedTests in GatlingTest <<= detectGatlingTests,
-		artifactTask in GatlingTest <<= (sbt.Keys.crossTarget in sbt.Compile, sbt.Keys.classDirectory in GatlingTest) map { (targetDir, classesDir) =>
+		artifactTask in GatlingTest <<= (sbt.Keys.crossTarget in sbt.Compile, sbt.Keys.classDirectory in GatlingTest, sbt.Keys.resourceDirectory in GatlingTest) map { (targetDir, classesDir, resourcesDir) =>
+			import java.io.File
 			import sbt.Path._
-			val sources = (classesDir ** sbt.GlobFilter("*.class") get) map { file =>
+			def normalize(dir: File, file: File): Option[Tuple2[File,String ]]= {
+				if (file.isDirectory()) return None
 				val filePath = file.getPath()
-				val index: Int = filePath.lastIndexOf(classesDir.getPath())
-				file -> filePath.substring(index + classesDir.getPath().length)
+				val index: Int = filePath.lastIndexOf(dir.getPath())
+				Some(file -> filePath.substring(index + dir.getPath().length + 1))
 			}
+			val sources = (classesDir ** sbt.GlobFilter("*.class") get).flatMap(normalize(classesDir, _)) ++
+				(resourcesDir ** sbt.GlobFilter("*") get).flatMap(normalize(resourcesDir, _))
+
 			val outputJar = new java.io.File(targetDir, "gatling.jar")
 			sbt.IO.zip(sources, outputJar)
 			outputJar
