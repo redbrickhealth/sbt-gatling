@@ -9,7 +9,7 @@ object Plugin extends sbt.impl.DependencyBuilders {
 	def buildArtifact(artifactNameSuffix: String = "") = {
 		sbt.addArtifact(
 			sbt.Keys.moduleName(
-				n => new sbt.Artifact(n + artifactNameSuffix, "jar", "jar", Some("gatling"), Set(sbt.Compile), None, Map.empty)
+				n => new sbt.Artifact(n + artifactNameSuffix, "jar", "jar", Some("gatling"), Set(GatlingTest), None, Map.empty)
 			),
 			artifactTask in GatlingTest
 		) ++ 
