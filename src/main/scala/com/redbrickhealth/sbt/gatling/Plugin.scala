@@ -22,6 +22,7 @@ object Plugin extends sbt.impl.DependencyBuilders {
 		sbt.Keys.libraryDependencies += "com.excilys.ebi.gatling.highcharts" % "gatling-charts-highcharts" % "1.5.1" % "gatling",
 		sbt.Keys.libraryDependencies += ("com.redbrickhealth" %% "sbt-gatling-support" % "1.2" % "gatling" changing)
 	) ++ sbt.inConfig(GatlingTest)(gatlingSettings)
+
 	lazy val gatlingSettings = sbt.Defaults.testSettings ++ Seq(
 		sbt.Keys.sourceDirectory in GatlingTest <<= (sbt.Keys.sourceDirectory in sbt.Configurations.Default) { source =>
 			import sbt.Path._
@@ -48,12 +49,63 @@ object Plugin extends sbt.impl.DependencyBuilders {
 		}
 	) 
 
-	def detectGatlingTests: sbt.Project.Initialize[sbt.Task[Seq[sbt.TestDefinition]]] = (sbt.Keys.streams, sbt.Keys.loadedTestFrameworks in GatlingTest, sbt.Keys.compile in GatlingTest) map { (streams, frameworkMap, analysis) =>
+	def detectGatlingTests: sbt.Project.Initialize[sbt.Task[Seq[sbt.TestDefinition]]] = (sbt.Keys.streams, sbt.Keys.loadedTestFrameworks in GatlingTest, sbt.Keys.compile in GatlingTest, sbt.Keys.dependencyClasspath in GatlingTest) map { (streams, frameworkMap, analysis, libs) =>
 		val fingerprint = new org.scalatools.testing.SubclassFingerprint {
 			def isModule(): Boolean = false
 			def superClassName(): String = "com.excilys.ebi.gatling.core.scenario.configuration.Simulation"
 		}
-		sbt.Tests.discover(frameworkMap.values.toSeq, analysis, streams.log)._1.toList
+		val parentLoader = getClass().getClassLoader()
+		val tests = List(
+			sbt.Tests.discover(frameworkMap.values.toSeq, analysis, streams.log)._1.toList,
+			libs.flatMap { lib =>
+				if (lib.data.getName().indexOf("-gatling-") > 0) {
+					import java.util.zip.{ZipEntry, ZipFile, ZipInputStream}
+					import scala.collection.JavaConversions._
+					val source = lib.data.getAbsolutePath()
+					streams.log.debug("checking %s for tests".format(source))
+					val zip = new ZipFile(lib.data)
+					val loader = new ClassLoader(parentLoader) {
+						def checkForGatling(entry: ZipEntry): Option[String] = {
+							try {
+								val length = entry.getSize().asInstanceOf[Int]
+								val buf = new Array[Byte](length)
+								val stream = zip.getInputStream(entry)
+								stream.read(buf, 0, length)
+								val cl = defineClass(buf, 0, length)
+								streams.log.debug("entry %s is not a gatling test".format(entry.getName()))
+								None
+							} catch {
+								case e: NoClassDefFoundError if e.getMessage() == "com/excilys/ebi/gatling/core/scenario/configuration/Simulation" => {
+									// We're using a classloader which doesn't have gatling in it, so 
+									// we get this NoClassDefFoundError which indicates that this 
+									// *is* a test.
+									val name = entry.getName()
+									val testName = name.substring(0, name.length()-6).replace("/", ".")
+									streams.log.debug("found test " + testName)
+									Some(testName)
+								}
+								case e => {
+									streams.log.debug("entry %s is not a gatling test: %s".format(entry.getName(), e))
+									None
+								}
+							}
+						}
+					}
+					zip.entries() flatMap { entry =>
+						if (entry.getName().endsWith(".class")) {
+							loader.checkForGatling(entry) map { name => 
+								new sbt.TestDefinition(name, fingerprint)
+							}
+						} else {
+							None
+						}
+					}
+				} else {
+					List.empty
+				}
+			}
+		).flatten
+		tests
 	}
 }
 
