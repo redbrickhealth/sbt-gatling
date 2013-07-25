@@ -20,7 +20,7 @@ object Plugin extends sbt.impl.DependencyBuilders {
 	lazy val settings: Seq[sbt.Project.Setting[_]] = Seq(
 		sbt.Keys.ivyConfigurations += GatlingTest,
 		sbt.Keys.libraryDependencies += "com.excilys.ebi.gatling.highcharts" % "gatling-charts-highcharts" % "1.5.1" % "gatling",
-		sbt.Keys.libraryDependencies += ("com.redbrickhealth" %% "sbt-gatling-support" % "1.2" % "gatling" changing)
+		sbt.Keys.libraryDependencies += ("com.redbrickhealth" %% "sbt-gatling-support" % "1.2.6" % "gatling")
 	) ++ sbt.inConfig(GatlingTest)(gatlingSettings)
 
 	lazy val gatlingSettings = sbt.Defaults.testSettings ++ Seq(
@@ -55,8 +55,10 @@ object Plugin extends sbt.impl.DependencyBuilders {
 			def superClassName(): String = "com.excilys.ebi.gatling.core.scenario.configuration.Simulation"
 		}
 		val parentLoader = getClass().getClassLoader()
+		val discoveredTests = sbt.Tests.discover(frameworkMap.values.toSeq, analysis, streams.log)._1.toList
+		streams.log.debug("Discovered local tests are " + discoveredTests)
 		val tests = List(
-			sbt.Tests.discover(frameworkMap.values.toSeq, analysis, streams.log)._1.toList,
+			discoveredTests,
 			libs.flatMap { lib =>
 				if (lib.data.getName().indexOf("-gatling-") > 0) {
 					import java.util.zip.{ZipEntry, ZipFile, ZipInputStream}
@@ -105,6 +107,7 @@ object Plugin extends sbt.impl.DependencyBuilders {
 				}
 			}
 		).flatten
+		streams.log.debug("all discovered tests are " + tests)
 		tests
 	}
 }
