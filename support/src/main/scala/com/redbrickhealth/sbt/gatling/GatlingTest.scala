@@ -263,7 +263,8 @@ with com.excilys.ebi.gatling.core.action.AkkaDefaults {
 		val simulation = try { simulationClass.newInstance }
 		catch {
 			case e => {
-				println("[error] %s: %s".format(testName, e.getMessage()))
+				println("Unable to initialize test %s".format(testName))
+				e.printStackTrace()
 				val handler = GatlingTest.simulationHandlers(runRecord.simulationId) 
 				handler.handle(new org.scalatools.testing.Event {
 					def testName() = testName
