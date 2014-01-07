@@ -19,8 +19,10 @@ object Plugin extends sbt.impl.DependencyBuilders {
 	lazy val GatlingTest = sbt.config("gatling") extend(sbt.Test)
 	lazy val settings: Seq[sbt.Project.Setting[_]] = Seq(
 		sbt.Keys.ivyConfigurations += GatlingTest,
-		sbt.Keys.libraryDependencies += "com.excilys.ebi.gatling.highcharts" % "gatling-charts-highcharts" % "1.5.1" % "gatling",
-		sbt.Keys.libraryDependencies += ("com.redbrickhealth" %% "sbt-gatling-support" % "1.2.6" % "gatling")
+		sbt.Keys.libraryDependencies ++= Seq(
+			"io.gatling" % "gatling-bundle" % "2.0.0-M3" % "gatling",
+			"com.redbrickhealth" %% "sbt-gatling-support" % "1.3" % "gatling"
+		)
 	) ++ sbt.inConfig(GatlingTest)(gatlingSettings)
 
 	lazy val gatlingSettings = sbt.Defaults.testSettings ++ Seq(
@@ -50,9 +52,10 @@ object Plugin extends sbt.impl.DependencyBuilders {
 	) 
 
 	def detectGatlingTests: sbt.Project.Initialize[sbt.Task[Seq[sbt.TestDefinition]]] = (sbt.Keys.streams, sbt.Keys.loadedTestFrameworks in GatlingTest, sbt.Keys.compile in GatlingTest, sbt.Keys.dependencyClasspath in GatlingTest) map { (streams, frameworkMap, analysis, libs) =>
-		val fingerprint = new org.scalatools.testing.SubclassFingerprint {
+		val fingerprint = new sbt.testing.SubclassFingerprint {
 			def isModule(): Boolean = false
-			def superClassName(): String = "com.excilys.ebi.gatling.core.scenario.configuration.Simulation"
+			def superclassName(): String = "com.excilys.ebi.gatling.core.scenario.configuration.Simulation"
+			def requireNoArgConstructor() = true
 		}
 		val parentLoader = getClass().getClassLoader()
 		val discoveredTests = sbt.Tests.discover(frameworkMap.values.toSeq, analysis, streams.log)._1.toList
@@ -86,7 +89,7 @@ object Plugin extends sbt.impl.DependencyBuilders {
 									streams.log.debug("found test " + testName)
 									Some(testName)
 								}
-								case e => {
+								case e: Throwable => {
 									streams.log.debug("entry %s is not a gatling test: %s".format(entry.getName(), e))
 									None
 								}
@@ -96,7 +99,7 @@ object Plugin extends sbt.impl.DependencyBuilders {
 					zip.entries() flatMap { entry =>
 						if (entry.getName().endsWith(".class")) {
 							loader.checkForGatling(entry) map { name => 
-								new sbt.TestDefinition(name, fingerprint)
+								new sbt.TestDefinition(name, fingerprint, true, Array.empty) // AJK
 							}
 						} else {
 							None

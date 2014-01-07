@@ -6,6 +6,9 @@ package com.redbrickhealth.sbt.gatling
   */
 
 import org.scalatools.testing._
+
+import io.gatling.core.result.message.{GroupMessage, KO, RequestMessage, RunMessage, ScenarioMessage, Status}
+
 class GatlingTest extends Framework {
 	def name(): String = {
 		"Gatling"
@@ -15,14 +18,14 @@ class GatlingTest extends Framework {
 		Array(
 			new SubclassFingerprint {
 				def isModule(): Boolean = false
-				def superClassName(): String = "com.excilys.ebi.gatling.core.scenario.configuration.Simulation"
+				def superClassName(): String = "io.gatling.core.scenario.configuration.Simulation"
 			}
 		)
 	}
 
 	def testRunner(cl: ClassLoader, loggers: Array[Logger]): Runner = {
-		import com.excilys.ebi.gatling.core.config.GatlingConfiguration
-		GatlingConfiguration.setUp(new java.util.HashMap())
+		import io.gatling.core.config.GatlingConfiguration
+		GatlingConfiguration.setUp(collection.mutable.Map.empty)
 		val sourceDir = new java.io.File("src/test/gatling").getAbsolutePath()
 		val targetDir = new java.io.File("target/gatling-reports").getAbsolutePath()
 		GatlingConfiguration.configuration = GatlingConfiguration.configuration.copy(
@@ -44,19 +47,17 @@ class GatlingTest extends Framework {
 }
 
 object GatlingTest {
-	import com.excilys.ebi.gatling.core.result.message.RequestStatus
-	import com.excilys.ebi.gatling.core.result.message.RunRecord
 	var simulationHandlers: Map[String,EventHandler] = Map.empty
 	
-	def clear(runRecord: RunRecord) {
+	def clear(runMessage: RunMessage) {
 		this.synchronized {
-			simulationHandlers = simulationHandlers - runRecord.simulationId
+			simulationHandlers = simulationHandlers - runMessage.simulationId
 		}
 	}
 
 	def finish(data: GatlingDataWriter) {
 		import java.io.File
-		val handler = simulationHandlers(data.runRecord.simulationId) 
+		val handler = simulationHandlers(data.runMessage.simulationId) 
 		val failures = data.requestStats.map ({ case (name, stats) =>
 			if (stats.failed > 0) 1 else 0
 		}).foldLeft(0) { (count, state) => count + state }
@@ -75,7 +76,7 @@ object GatlingTest {
 				def error(): Throwable = null
 			})
 		}
-		val suiteName = data.runRecord.runDescription
+		val suiteName = data.runMessage.runDescription
 		val hostname = "unknown"
 		val time: Double = 1.0
 		val errors = 0
@@ -98,13 +99,16 @@ object GatlingTest {
 		xml.append(output).append(xmlFooter)
 		sbt.IO.createDirectory(new File("target/gatling-reports/xml"))
 		sbt.IO.write(new File("target/gatling-reports/xml/%s.xml".format(suiteName)), xml.toString())
-		clear(data.runRecord)
+		clear(data.runMessage)
 	}
 }
 
 class GatlingRunner(cl: ClassLoader, loggers: Array[Logger]) 
 extends Runner2 
-with com.excilys.ebi.gatling.core.action.AkkaDefaults {
+with io.gatling.core.action.AkkaDefaults {
+	import io.gatling.core.action.system
+	import io.gatling.core.action.system.dispatcher
+
 	val singleTestOutput = true
 	val summaryScript = """
 		 var totalSimulations = 0
@@ -239,40 +243,39 @@ with com.excilys.ebi.gatling.core.action.AkkaDefaults {
 		GatlingTest.synchronized {
 			GatlingTest.simulationHandlers = GatlingTest.simulationHandlers + (testId -> eventHandler)
 		}
-		import com.excilys.ebi.gatling.core.scenario.configuration.Simulation
-		val selection = com.excilys.ebi.gatling.core.runner.Selection(
+		import io.gatling.core.scenario.Simulation
+		val selection = io.gatling.core.runner.Selection(
 			cl.loadClass(testClassName).asInstanceOf[Class[Simulation]],
 			testId, testName
 		)
 		
 		import java.util.concurrent.CountDownLatch
 		import java.util.concurrent.TimeUnit.SECONDS
-		import akka.dispatch.Await
-		import com.excilys.ebi.gatling.core.config.GatlingConfiguration.configuration
-		import com.excilys.ebi.gatling.core.result.message.RunRecord
-		import com.excilys.ebi.gatling.core.result.terminator.Terminator
-		import com.excilys.ebi.gatling.core.result.writer.DataWriter
+		import scala.concurrent.Await
+		import io.gatling.core.config.GatlingConfiguration.configuration
+		import io.gatling.core.result.terminator.Terminator
+		import io.gatling.core.result.writer.DataWriter
 		import org.joda.time.DateTime.now
-		// Borrowed from com.excilys.ebi.gatling.core.runner.Runner.scala
+		// Borrowed from io.gatling.core.runner.Runner.scala
 		// to avoid system.shutdown.
 		val simulationClass = selection.simulationClass
 		println("[info] Simulation " + simulationClass.getName + " started...")
 
-		val runRecord = RunRecord(now, selection.simulationId, selection.description)
+		val runMessage = RunMessage(now, selection.simulationId, selection.description)
 
 		val simulation = try { simulationClass.newInstance }
 		catch {
 			case e => {
 				println("Unable to initialize test %s".format(testName))
 				e.printStackTrace()
-				val handler = GatlingTest.simulationHandlers(runRecord.simulationId) 
+				val handler = GatlingTest.simulationHandlers(runMessage.simulationId) 
 				handler.handle(new org.scalatools.testing.Event {
 					def testName() = testName
 					def description() = testName
 					def result(): Result = Result.Failure
 					def error(): Throwable = e
 				})
-				val suiteName = runRecord.runDescription
+				val suiteName = runMessage.runDescription
 				sbt.IO.createDirectory(new java.io.File("target/gatling-reports/" + suiteName))
 				val html = """
 				Test failed to start: %s
@@ -291,13 +294,13 @@ with com.excilys.ebi.gatling.core.action.AkkaDefaults {
 		val scenarioNames = scenarios.map(_.name)
 		require(scenarioNames.toSet.size == scenarioNames.size, "Scenario names must be unique but found " + scenarioNames)
 
-		val totalNumberOfUsers = scenarios.map(_.configuration.users).sum
+		val totalNumberOfUsers = scenarios.map(_.injectionProfile.users).sum
 		// info("Total number of users : " + totalNumberOfUsers)
 
 		val terminatorLatch = new CountDownLatch(1)
 		val init = Terminator
 			.askInit(terminatorLatch, totalNumberOfUsers)
-			.flatMap { _: Any => DataWriter.askInit(runRecord, scenarios) }
+			.flatMap { _: Any => DataWriter.askInit(runMessage, scenarios) }
 
 		Await.result(init, defaultTimeOut.duration)
 
@@ -305,7 +308,7 @@ with com.excilys.ebi.gatling.core.action.AkkaDefaults {
 
 		scenarios.foldLeft(0) { (i, scenario) =>
 			scenario.run(i)
-			i + scenario.configuration.users
+			i + scenario.injectionProfile.users
 		}
 		// debug("Finished Launching scenarios executions")
 
@@ -318,8 +321,8 @@ with com.excilys.ebi.gatling.core.action.AkkaDefaults {
 		println("[info] Simulation finished.")
 
 		// And now we generate the HTML reports
-		val dataReader = com.excilys.ebi.gatling.core.result.reader.DataReader.newInstance(runRecord.runId)
-		val indexFile = com.excilys.ebi.gatling.charts.report.ReportsGenerator.generateFor(
+		val dataReader = io.gatling.core.result.reader.DataReader.newInstance(runMessage.runId)
+		val indexFile = io.gatling.charts.report.ReportsGenerator.generateFor(
 			testId,
 			dataReader
 		)
@@ -332,46 +335,47 @@ class RequestStats {
 	var count: Long = 0
 	var duration: Long = 1
 	var failed: Long = 0
-	import com.excilys.ebi.gatling.core.result.message.{RequestRecord, RequestStatus}
-	def update(record: RequestRecord) {
+	def update(record: RequestMessage) {
 		this.synchronized {
 			count = count + 1
-			duration = duration + record.executionEndDate - record.executionStartDate
-			if (record.requestStatus == RequestStatus.KO) failed = failed + 1
+			duration = duration + record.requestEndDate - record.requestStartDate
+			if (record.status == KO) failed = failed + 1
 		}
 	}
 }
 
-class GatlingDataWriter extends com.excilys.ebi.gatling.core.result.writer.DataWriter {
-	import com.excilys.ebi.gatling.core.result.message.{GroupRecord, RequestRecord, RequestStatus, RunRecord, ScenarioRecord, ShortScenarioDescription}
-	var runRecord: RunRecord = null
+class GatlingDataWriter extends io.gatling.core.result.writer.DataWriter {
+	import io.gatling.core.result.message.{ShortScenarioDescription}
+	var runMessage: RunMessage = null
 	var failed: Boolean = false
 	var requestStats: Map[String,RequestStats] = Map.empty
 
 	def onFlushDataWriter() {
 		GatlingTest.finish(this)
-		runRecord = null
+		runMessage = null
 		failed = false
 		requestStats = Map.empty
 	}
-	def onInitializeDataWriter(runRecord: RunRecord, scenarios: Seq[ShortScenarioDescription]) {
-		this.runRecord = runRecord
+	def onInitializeDataWriter(runMessage: RunMessage, scenarios: Seq[ShortScenarioDescription]) {
+		this.runMessage = runMessage
 	}
-	def onRequestRecord(requestRecord: RequestRecord) {
-		if (requestRecord.requestStatus == RequestStatus.KO) failed = true
-		val stats = requestStats.get(requestRecord.requestName) getOrElse {
+	def onRequestMessage(requestMessage: RequestMessage) {
+		if (requestMessage.status == KO) failed = true
+		val stats = requestStats.get(requestMessage.name) getOrElse {
 			this.synchronized {
-				requestStats.get(requestRecord.requestName) getOrElse {
-					val r = requestRecord.requestName -> new RequestStats()
+				requestStats.get(requestMessage.name) getOrElse {
+					val r = requestMessage.name -> new RequestStats()
 					requestStats = requestStats + r
 					r._2
 				}
 			}
 		}
-		stats.update(requestRecord)
+		stats.update(requestMessage)
 	}
-	def onGroupRecord(groupRecord: GroupRecord) {
+
+	def onGroupMessage(groupMessage: GroupMessage) {
 	}
-	def onScenarioRecord(scenarioRecord: ScenarioRecord) {
+
+	def onScenarioMessage(scenarioMessage: ScenarioMessage) {
 	}
 }

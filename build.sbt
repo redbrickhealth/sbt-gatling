@@ -3,7 +3,7 @@ sbtPlugin := true
 name := "sbt-gatling-plugin"
 
 libraryDependencies ++= Seq(
-	"com.excilys.ebi.gatling.highcharts" % "gatling-charts-highcharts" % "1.5.1"
+	"io.gatling" % "gatling-charts" % "2.0.0-M3"
 )
 
 if (System.getProperty("rbh.build.id") == null) 
