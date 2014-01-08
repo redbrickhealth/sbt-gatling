@@ -18,7 +18,8 @@ class GatlingTest extends Framework {
 		Array(
 			new SubclassFingerprint {
 				def isModule(): Boolean = false
-				def superClassName(): String = "io.gatling.core.scenario.configuration.Simulation"
+				val className = classOf[io.gatling.core.scenario.Simulation].getName()
+				def superClassName(): String = className
 			}
 		)
 	}
